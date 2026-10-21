@@ -358,7 +358,7 @@ def _merged_plan(dtype_plan: dict, passed_plan: dict) -> dict:
     for pattern, entry in passed_plan.items():
         if entry is None:
             merged[pattern] = None
-        elif type(merged.get(pattern)) is type(entry):
+        elif isinstance(entry, BlockScaledConfig) and type(merged.get(pattern)) is type(entry):
             merged[pattern] = copy.copy(merged[pattern])
             merged[pattern].activation_format = entry.activation_format
             merged[pattern].post_init()

@@ -1807,16 +1807,19 @@ class BlockScaledConfig(QuantizationConfigMixin):
         # first overridden by `NVFP4Config` in #49779, which rejects weight-only checkpoints
 
     def loading_attributes_source(self, config):
-        # A `FineGrainedConfig` lends to a single-format checkpoint if its plan is empty or holds only that format.
-        # The plan entry then also lends its activation format.
+        # A `FineGrainedConfig` lends to a single-format checkpoint if its plan holds no other format.
+        # Its format entry lends its activation format. Its `None` entries become the skip-list.
         if not isinstance(config, FineGrainedConfig):
             return super().loading_attributes_source(config)
-        entries = list(config.dtype_plan.values())
+        entries = [entry for entry in config.dtype_plan.values() if entry is not None]
         if len(entries) > 1 or any(type(entry) is not type(self) for entry in entries):
             return None
-        lender = copy.copy(entries[0] if entries else self)
-        lender.dequantize, lender.modules_to_not_convert = config.dequantize, config.modules_to_not_convert
-        return lender
+        source = copy.copy(entries[0] if entries else self)
+        source.dequantize = config.dequantize
+        # `should_convert_module` matches from the start, so `.*?` and `.*` make it search for the pattern
+        skipped = [rf".*?(?:{pattern}).*" for pattern, entry in config.dtype_plan.items() if entry is None]
+        source.modules_to_not_convert = skipped or None
+        return source
 
 
 # Block-scaled format configs by `quant_method`, to read plan entries back from `config.json`
@@ -1911,7 +1914,9 @@ class FineGrainedConfig(QuantizationConfigMixin):
         entry.dequantize, entry.modules_to_not_convert = False, None
         same_format = {pattern: entry for pattern, own in self.dtype_plan.items() if type(own) is type(config)}
         skipped = dict.fromkeys(map(skip_pattern, getattr(config, "modules_to_not_convert", None) or []))
-        return FineGrainedConfig(dtype_plan={**skipped, **same_format}, dequantize=getattr(config, "dequantize", False))
+        return FineGrainedConfig(
+            dtype_plan={**skipped, **same_format}, dequantize=getattr(config, "dequantize", False)
+        )
 
 
 @dataclass
