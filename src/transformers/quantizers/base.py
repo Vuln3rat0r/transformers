@@ -90,11 +90,16 @@ class HfQuantizer(ABC):
         dtype_plan_skip (`str`, *optional*):
             Set by [`FineGrainedHfQuantizer`] on its members. It is a skip-list entry for every module outside this
             quantizer's `dtype_plan` entries. `get_modules_to_not_convert` then returns it instead of the skip-list.
+        dtype_plan_targets (`list[str]`):
+            Set by [`FineGrainedHfQuantizer`] on its members. They are the patterns of this quantizer's entries that
+            name modules, so not the `".*"` catch-all. A quantizer that skips some modules by default, such as
+            embeddings, converts the ones they name.
     """
 
     requires_calibration = False
     dequantized_saves_unquantized = False
     dtype_plan_skip: str | None = None
+    dtype_plan_targets: tuple[str, ...] = ()
 
     def __init__(self, quantization_config: QuantizationConfigMixin, **kwargs):
         self.quantization_config = quantization_config

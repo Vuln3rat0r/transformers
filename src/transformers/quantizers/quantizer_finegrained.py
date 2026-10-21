@@ -21,7 +21,7 @@ import re
 from typing import TYPE_CHECKING
 
 from .base import HfQuantizer, get_keys_to_not_convert
-from .quantizers_utils import checkpoint_module_namer, module_kind, plan_entry_for, skip_pattern
+from .quantizers_utils import checkpoint_module_namer, plan_entry_for, skip_pattern
 
 
 if TYPE_CHECKING:
@@ -153,7 +153,6 @@ class FineGrainedHfQuantizer(HfQuantizer):
         self._plan.update(dict.fromkeys(map(skip_pattern, skipped)))
         to_checkpoint = checkpoint_module_namer(model)
         owners = {name: self.member_for(name) for name, _ in model.named_modules()}
-        tables = self._embedding_tables(model)
         for member in self.members:
             own = [pattern for pattern, owner in self._plan.items() if owner is member]
             others = [pattern for pattern in self._plan if pattern not in own]
@@ -161,9 +160,8 @@ class FineGrainedHfQuantizer(HfQuantizer):
             parents = {parent for name, owner in owners.items() if owner is member for parent in _parents(name)}
             parents |= {to_checkpoint(parent) for parent in parents}
             member.dtype_plan_skip = _skip_unowned(own, others, parents)
+            member.dtype_plan_targets = [pattern for pattern in own if pattern != ".*"]
             before = {name: type(module) for name, module in model.named_modules()}
-            # every member knows every table. Only the owner's skip-list lets it convert one.
-            member.quantization_config.modules_to_convert = tables
             member._process_model_before_weight_loading(model, **kwargs)
             # a member that ignores `dtype_plan_skip` would take modules of other entries
             for name, module in model.named_modules():
@@ -172,15 +170,6 @@ class FineGrainedHfQuantizer(HfQuantizer):
                         f"{type(member).__name__} converted {name!r}, which its `dtype_plan` entry does not cover. "
                         "A member must build its skip-list with `get_modules_to_not_convert`."
                     )
-
-    def _embedding_tables(self, model: "PreTrainedModel") -> list[str]:
-        """Return the embedding tables a targeted entry names. A quantizer skips embeddings unless they are opted in."""
-        return [
-            name
-            for name, module in model.named_modules()
-            if module_kind(name, module) == "embedding"
-            and plan_entry_for(self._plan, name, catch_all=False) is not None
-        ]
 
     def _resolve_plan(self, model: "PreTrainedModel"):
         """Add an entry by model name for each module a pattern matches by its checkpoint name.
